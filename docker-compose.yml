@@ -1,0 +1,17 @@
+services:
+  karakeep-bot:
+    build: .
+    container_name: karakeep-bot
+    restart: unless-stopped
+    volumes:
+      - karakeep-bot-data:/data
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - KARAKEEP_URL=${KARAKEEP_URL:-https://hoarder.magor-lab.hu}
+      - KARAKEEP_TOKEN=${KARAKEEP_TOKEN:-}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
+      - LOG_LEVEL=INFO
+      - RETRY_INTERVAL=60
+
+volumes:
+  karakeep-bot-data:

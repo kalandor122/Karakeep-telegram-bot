@@ -1,0 +1,14 @@
+# Environments
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Docker volumes
+karakeep-bot-data/
+
+# IDE
+.vscode/
+.idea/
