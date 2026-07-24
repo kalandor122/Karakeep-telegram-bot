@@ -95,7 +95,7 @@ def queue_count() -> int:
 
 async def send_to_karakeep(type_: str, content: str, caption: str = "") -> tuple[bool, str]:
     if not KARAKEEP_TOKEN:
-        return False, "Karakeep API key nincs beállítva — /setkey (api_key)"
+        return False, "Karakeep API key is not set — use /setkey [api_key]"
 
     headers = {
         "Authorization": f"Bearer {KARAKEEP_TOKEN}",
@@ -109,13 +109,13 @@ async def send_to_karakeep(type_: str, content: str, caption: str = "") -> tuple
     elif type_ == "image":
         payload = {"type": "link", "url": content}
     else:
-        return False, f"Ismeretlen típus: {type_}"
+        return False, f"Unknown type: {type_}"
 
     if caption:
         payload.setdefault("title", caption[:200])
 
     try:
-        log.info(f"Küldés: type={type_}, preview={content[:80]}...")
+        log.info(f"Sending: type={type_}, preview={content[:80]}...")
         r = await asyncio.to_thread(
             requests.post,
             f"{KARAKEEP_URL}/api/v1/bookmarks",
@@ -124,9 +124,9 @@ async def send_to_karakeep(type_: str, content: str, caption: str = "") -> tuple
             timeout=30,
         )
         if r.status_code in (200, 201):
-            return True, "✅ Elmentve a Karakeep-be!"
+            return True, "✅ Saved to Karakeep!"
         elif r.status_code == 401:
-            return False, "❌ Érvénytelen API key"
+            return False, "❌ Invalid API key"
         elif r.status_code in (400, 422):
             # Retry without title for compatibility
             simple = {"type": "link", "url": content}
@@ -135,16 +135,16 @@ async def send_to_karakeep(type_: str, content: str, caption: str = "") -> tuple
                 headers=headers, json=simple, timeout=30,
             )
             if r2.status_code in (200, 201):
-                return True, "✅ Elmentve!"
-            return False, f"❌ Karakeep hiba ({r.status_code}): {r.text[:200]}"
+                return True, "✅ Saved!"
+            return False, f"❌ Karakeep error ({r.status_code}): {r.text[:200]}"
         else:
-            return False, f"❌ Karakeep hiba ({r.status_code}): {r.text[:200]}"
+            return False, f"❌ Karakeep error ({r.status_code}): {r.text[:200]}"
     except requests.ConnectionError:
-        return False, "🔌 Karakeep nem elérhető"
+        return False, "🔌 Karakeep is unreachable"
     except requests.Timeout:
-        return False, "⏱️ Karakeep időtúllépés"
+        return False, "⏱️ Karakeep timed out"
     except Exception as e:
-        return False, f"❌ Hiba: {e}"
+        return False, f"❌ Error: {e}"
 
 # ─── Periodic queue flush ────────────────────────────────────────────────────
 
@@ -156,7 +156,7 @@ async def flush_queue():
     pending = dequeue_all()
     if not pending:
         return
-    log.info(f"Queue flush: {len(pending)} elem")
+    log.info(f"Flushing queue: {len(pending)} items")
     failed = []
     for item in pending:
         ok, msg = await send_to_karakeep(item["type"], item["content"], item.get("caption", ""))
@@ -166,9 +166,9 @@ async def flush_queue():
         await asyncio.sleep(0.5)
     if failed:
         requeue_failed(failed)
-        log.info(f"{len(failed)} elem vissza a queue-ba")
+        log.info(f"Re-queued {len(failed)} items after failure")
     else:
-        log.info(f"Queue kiürítve ({len(pending)} elem)")
+        log.info(f"Queue flushed ({len(pending)} items)")
 
 async def flush_loop(stop_event: asyncio.Event):
     """Periodically flush queue until stop_event is set."""
@@ -197,25 +197,26 @@ def is_allowed(update: Update) -> bool:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
-        await update.message.reply_text("⛔ Nincs jogosultságod.")
+        await update.message.reply_text("⛔ You are not authorized.")
         return
     q = queue_count()
     parts = []
     if KARAKEEP_TOKEN:
-        parts.append("✅ API key beállítva")
+        parts.append("✅ API key configured")
     else:
-        parts.append("⚠️ Nincs API key — /setkey (api_key)")
+        parts.append("⚠️ No API key — use /setkey [api_key]")
     if q > 0:
-        parts.append(f"⏳ Queue-ban: {q} elem")
+        parts.append(f"⏳ {q} items queued")
 
     await update.message.reply_text(
-        "🤖 Karakeep Bot\n\n"
-        "Küldj linket, szöveget vagy képet → elmentem a Karakeep-be!\n\n"
-        "Státusz:\n• " + "\n• ".join(parts) + "\n\n"
-        "Parancsok:\n"
-        "• /setkey [api_key] — API key beállítása\n"
-        "• /status — Queue státusz\n"
-        "• /flush — Queue azonnali elküldése"
+        "🤖 *Karakeep Bot*\n\n"
+        "Send me a link, text, or image and I'll save it to your Karakeep instance!\n\n"
+        "*Status:*\n• " + "\n• ".join(parts) + "\n\n"
+        "*Commands:*\n"
+        "• `/setkey [api_key]` — Set Karakeep API key\n"
+        "• `/status` — Show queue status\n"
+        "• `/flush` — Send queued items immediately",
+        parse_mode="Markdown",
     )
 
 async def setkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -223,40 +224,42 @@ async def setkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     global KARAKEEP_TOKEN
     if not context.args:
-        await update.message.reply_text("Használat: /setkey [api_key]")
+        await update.message.reply_text("Usage: `/setkey [api_key]`", parse_mode="Markdown")
         return
     KARAKEEP_TOKEN = context.args[0]
-    log.info("API key frissítve")
-    await update.message.reply_text("✅ API key elmentve!")
+    log.info("API key updated")
+    await update.message.reply_text("✅ API key saved!")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
         return
     q = queue_count()
     lines = [
-        "📊 Státusz",
-        f"• Queue-ban: {q} elem",
-        f"• Karakeep URL: {KARAKEEP_URL}",
-        f"• API key: {'✅ beállítva' if KARAKEEP_TOKEN else '❌ nincs'}",
+        "📊 *Status*",
+        f"• Queue: *{q}* item{'s' if q != 1 else ''}",
+        f"• Karakeep URL: `{KARAKEEP_URL}`",
+        f"• API key: {'✅ set' if KARAKEEP_TOKEN else '❌ not set'}",
     ]
     if q > 0:
-        lines.append("\n/flush → azonnali küldés")
-    await update.message.reply_text("\n".join(lines))
+        lines.append("\n`/flush` to send now")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def flush_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
         return
     q = queue_count()
     if q == 0:
-        await update.message.reply_text("✅ A queue üres.")
+        await update.message.reply_text("✅ Queue is empty.")
         return
-    await update.message.reply_text(f"⏳ {q} elem küldése...")
+    await update.message.reply_text(f"⏳ Sending {q} item{'s' if q != 1 else ''}...")
     await flush_queue()
     remaining = queue_count()
     if remaining == 0:
-        await update.message.reply_text("✅ Queue kiürítve! 🎉")
+        await update.message.reply_text("✅ Queue flushed! 🎉")
     else:
-        await update.message.reply_text(f"⚠️ {remaining} elem maradt — automatikus újrapróbálkozás...")
+        await update.message.reply_text(
+            f"⚠️ {remaining} item{'s' if remaining != 1 else ''} failed — will retry automatically..."
+        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
@@ -291,10 +294,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         content_value = text
 
     if not content_type:
-        await msg.reply_text("Küldj linket, szöveget vagy képet!")
+        await msg.reply_text("Send me a link, text, or image!")
         return
 
-    log.info(f"Bejövő: type={content_type}, preview={content_value[:80]}...")
+    log.info(f"Incoming: type={content_type}, preview={content_value[:80]}...")
 
     ok, result_msg = await send_to_karakeep(content_type, content_value, caption)
     if ok:
@@ -303,15 +306,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         enqueue(content_type, content_value, caption)
         q = queue_count()
         await msg.reply_text(
-            f"⏳ Queue-ba rakva ({q}. elem)\n{result_msg}\n"
-            f"Automatikusan újrapróbálom, ha Karakeep elérhető."
+            f"⏳ *Queued* (#{q})\n{result_msg}\n"
+            f"Will retry automatically when Karakeep is back online.",
+            parse_mode="Markdown",
         )
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 async def main():
     if not BOT_TOKEN:
-        log.error("BOT_TOKEN nincs beállítva!")
+        log.error("BOT_TOKEN environment variable is not set!")
         return
 
     # Create stop event for clean shutdown
@@ -321,7 +325,7 @@ async def main():
     flush_task = asyncio.create_task(flush_loop(stop_event))
     _background_tasks.add(flush_task)
     flush_task.add_done_callback(_background_tasks.discard)
-    log.info(f"Queue flush: interval={RETRY_INTERVAL_SECONDS}s")
+    log.info(f"Queue flush worker started (interval={RETRY_INTERVAL_SECONDS}s)")
 
     # Build bot app
     app = Application.builder().token(BOT_TOKEN).build()
@@ -331,19 +335,17 @@ async def main():
     app.add_handler(CommandHandler("flush", flush_cmd))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
-    log.info(f"Bot indul! URL={KARAKEEP_URL}, API key={'✅' if KARAKEEP_TOKEN else '❌'}")
+    log.info(f"Bot starting! URL={KARAKEEP_URL}, API key={'✅' if KARAKEEP_TOKEN else '❌'}")
 
-    # Run the bot using the Application's own event handling
-    # run_polling handles its own asyncio loop internally
+    # Run manually (not via run_polling) so we can run background tasks
     try:
         await app.initialize()
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
-        # Keep running until stop signal
-        log.info("Bot fut. Nyomj Ctrl+C a leállításhoz.")
-        
-        # Wait indefinitely (or until stop signal)
+        log.info("Bot is running. Press Ctrl+C to stop.")
+
+        # Wait until stop signal
         stop_signal = asyncio.Event()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
@@ -351,30 +353,29 @@ async def main():
                     sig, lambda: asyncio.create_task(shutdown(app, stop_event, stop_signal))
                 )
             except NotImplementedError:
-                # Windows doesn't support add_signal_handler
-                pass
-        
+                pass  # Windows doesn't support add_signal_handler
+
         await stop_signal.wait()
     finally:
         await shutdown(app, stop_event, None)
 
 async def shutdown(app, stop_event, stop_signal):
     """Graceful shutdown."""
-    log.info("Leállítás...")
+    log.info("Shutting down...")
     stop_event.set()
-    
+
     try:
         if app.updater:
             await app.updater.stop()
         await app.stop()
         await app.shutdown()
     except Exception as e:
-        log.warning(f"Leállítási hiba: {e}")
-    
+        log.warning(f"Shutdown error: {e}")
+
     if stop_signal:
         stop_signal.set()
-    
-    log.info("Viszlát!")
+
+    log.info("Goodbye!")
 
 if __name__ == "__main__":
     asyncio.run(main())
